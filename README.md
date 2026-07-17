@@ -7,8 +7,16 @@ Then run: `./.venv/Scripts/python -m uvicorn app.main:app --reload --port 8000`
 
 **Data:** the dashboard is the system of record — add/edit opportunities, mark them lost, and
 manage Inter BU projects directly in the UI (no Excel round-trip). A background job just
-recomputes overdue alerts every 60s; there's no rescan step. The first time you use the app it
-asks for your name once (stored in the browser) so edits are credited in the History timeline.
+recomputes overdue alerts every 60s; there's no rescan step.
+
+**Accounts:** the app requires login (per-user email + password) — there's no self-serve signup.
+Create an account by running, from `backend/` with the venv active:
+```
+./.venv/Scripts/python scripts/create_user.py --email you@example.com --name "Your Name"
+```
+It prompts for a password (not passed as an argument, so it never lands in shell history). Add
+`--update-password` to the same command to reset an existing account's password. The name you
+give becomes the identity shown in the History timeline.
 
 **Extension points:** `WorkbookSource`/the ingestion pipeline (`backend/app/ingestion/`) is kept
 in the repo but dormant — no longer wired into `main.py` — in case a bulk Excel re-import is ever

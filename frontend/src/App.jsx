@@ -1,25 +1,38 @@
 import { useState } from 'react'
 import AlertsBell from './components/AlertsBell'
-import NameGate from './components/NameGate'
+import { useAuth } from './hooks/useAuth'
 import InterBU from './pages/InterBU'
 import LiveOpportunities from './pages/LiveOpportunities'
+import Login from './pages/Login'
 import LostOpportunities from './pages/LostOpportunities'
+import ProposalsSubmitted from './pages/ProposalsSubmitted'
 
 const TABS = [
   { key: 'live', label: 'Live Opportunities' },
-  { key: 'lost', label: 'Lost' },
+  { key: 'lost', label: 'Lost/Abandoned' },
+  { key: 'proposals', label: 'Proposals Submitted' },
   { key: 'interbu', label: 'Inter BU' },
 ]
 
 const PAGES = {
   live: LiveOpportunities,
   lost: LostOpportunities,
+  proposals: ProposalsSubmitted,
   interbu: InterBU,
 }
 
 function App() {
   const [tab, setTab] = useState('live')
+  const { status, user, onLoginSuccess, logout } = useAuth()
   const Page = PAGES[tab]
+
+  if (status === 'loading') {
+    return <div className="min-h-screen bg-gray-50" />
+  }
+
+  if (status === 'anon') {
+    return <Login onSuccess={onLoginSuccess} />
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -42,7 +55,10 @@ function App() {
             ))}
           </div>
           <div className="flex items-center gap-3">
-            <NameGate />
+            <span className="text-xs text-gray-500">Signed in as {user.display_name}</span>
+            <button type="button" onClick={logout} className="text-xs text-gray-500 hover:text-gray-700">
+              Log out
+            </button>
             <AlertsBell />
           </div>
         </nav>

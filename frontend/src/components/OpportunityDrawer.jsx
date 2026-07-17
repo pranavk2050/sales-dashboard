@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import { createOpportunity, markOpportunityLost, updateOpportunity } from '../lib/api'
-import { getUserName } from '../lib/currentUser'
+import { createOpportunity, markOpportunityLost, markProposalSubmitted, updateOpportunity } from '../lib/api'
 import { formatCr } from '../lib/format'
 import HistoryTimeline from './HistoryTimeline'
 import OppLeadId from './OppLeadId'
@@ -37,6 +36,7 @@ function toDraft(o) {
     timeline: o?.timeline ?? '',
     delivery_team: o?.delivery_team ?? '',
     sales_team: o?.sales_team ?? '',
+    proposal_submitted_date: o?.proposal_submitted_date ?? '',
   }
 }
 
@@ -52,6 +52,7 @@ function draftToPayload(draft) {
     timeline: draft.timeline || null,
     delivery_team: draft.delivery_team || null,
     sales_team: draft.sales_team || null,
+    proposal_submitted_date: draft.proposal_submitted_date || null,
   }
 }
 
@@ -64,6 +65,7 @@ export default function OpportunityDrawer({ opportunity, creating, onClose, onSa
   const [error, setError] = useState(null)
   const [markingLost, setMarkingLost] = useState(false)
   const [lostReason, setLostReason] = useState('')
+  const [markingProposalSubmitted, setMarkingProposalSubmitted] = useState(false)
 
   useEffect(() => {
     setCurrent(creating ? null : opportunity)
@@ -71,6 +73,7 @@ export default function OpportunityDrawer({ opportunity, creating, onClose, onSa
     setIsEditing(!!creating)
     setMarkingLost(false)
     setLostReason('')
+    setMarkingProposalSubmitted(false)
     setError(null)
   }, [opportunity, creating])
 
@@ -82,20 +85,15 @@ export default function OpportunityDrawer({ opportunity, creating, onClose, onSa
     setSaving(true)
     setError(null)
     try {
-      const changed_by = getUserName() || 'Anonymous'
       if (creating) {
         await createOpportunity({
           opp_lead_no: draft.opp_lead_no || undefined,
           ...draftToPayload(draft),
-          changed_by,
         })
         onSaved()
         onClose()
       } else {
-        const updated = await updateOpportunity(current.opp_lead_no, {
-          ...draftToPayload(draft),
-          changed_by,
-        })
+        const updated = await updateOpportunity(current.opp_lead_no, draftToPayload(draft))
         setCurrent(updated)
         setDraft(toDraft(updated))
         setIsEditing(false)
@@ -113,14 +111,29 @@ export default function OpportunityDrawer({ opportunity, creating, onClose, onSa
     setSaving(true)
     setError(null)
     try {
-      const changed_by = getUserName() || 'Anonymous'
-      await markOpportunityLost(current.opp_lead_no, { lost_reason: lostReason, changed_by })
+      await markOpportunityLost(current.opp_lead_no, { lost_reason: lostReason })
       onSaved()
       onClose()
     } catch (e) {
       setError(e.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleMarkProposalSubmitted = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      const updated = await markProposalSubmitted(current.opp_lead_no)
+      setCurrent(updated)
+      setDraft(toDraft(updated))
+      onSaved()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+      setMarkingProposalSubmitted(false)
     }
   }
 
@@ -164,6 +177,12 @@ export default function OpportunityDrawer({ opportunity, creating, onClose, onSa
               <Input label="Progress" type="number" value={draft.progress} onChange={setField('progress')} />
               <Input label="Expected quarter" value={draft.expected_quarter} onChange={setField('expected_quarter')} placeholder="e.g. Q3" />
               <Input label="Timeline" type="date" value={draft.timeline} onChange={setField('timeline')} />
+              <Input
+                label="Proposal submitted"
+                type="date"
+                value={draft.proposal_submitted_date}
+                onChange={setField('proposal_submitted_date')}
+              />
             </div>
             <Input label="Present status" value={draft.present_status} onChange={setField('present_status')} />
             <div className="grid grid-cols-2 gap-4">
@@ -210,6 +229,7 @@ export default function OpportunityDrawer({ opportunity, creating, onClose, onSa
                   daysOverdue={o.days_overdue}
                 />
               </Field>
+              <Field label="Proposal submitted">{o.proposal_submitted_date ?? '—'}</Field>
             </div>
 
             <div className="mt-4">
@@ -241,7 +261,39 @@ export default function OpportunityDrawer({ opportunity, creating, onClose, onSa
                   Mark as Lost
                 </button>
               )}
+              {!o.proposal_submitted_date && !markingProposalSubmitted && (
+                <button
+                  type="button"
+                  onClick={() => setMarkingProposalSubmitted(true)}
+                  className="text-sm px-3 py-1.5 rounded border border-blue-300 text-blue-700 hover:bg-blue-50"
+                >
+                  Mark as Proposal Submitted
+                </button>
+              )}
             </div>
+
+            {markingProposalSubmitted && (
+              <div className="mt-3 p-3 bg-blue-50 rounded border border-blue-100">
+                <div className="text-sm text-gray-700">Record today's date as the proposal submission date?</div>
+                <div className="flex gap-2 mt-2">
+                  <button
+                    type="button"
+                    onClick={handleMarkProposalSubmitted}
+                    disabled={saving}
+                    className="text-sm px-3 py-1.5 rounded bg-blue-600 text-white disabled:opacity-40 hover:bg-blue-700"
+                  >
+                    {saving ? 'Saving…' : 'Confirm'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMarkingProposalSubmitted(false)}
+                    className="text-sm px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
 
             {markingLost && (
               <div className="mt-3 p-3 bg-red-50 rounded border border-red-100">

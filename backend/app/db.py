@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS opportunities_snapshot (
   sales_team TEXT,
   is_lost INTEGER NOT NULL DEFAULT 0,
   lost_date TEXT,
+  proposal_submitted_date TEXT,
   last_seen_at TEXT NOT NULL
 );
 
@@ -94,6 +95,22 @@ CREATE TABLE IF NOT EXISTS interbu_monthly_notes (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (bu, month)
 );
+
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL UNIQUE,
+  display_name TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
 """
 
 
@@ -103,10 +120,19 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, coltype: str) -> None:
+    """CREATE TABLE IF NOT EXISTS is a no-op on a table that already exists, so a new column
+    added to SCHEMA never reaches an existing on-disk database - this adds it if missing."""
+    cols = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+
+
 def init_db() -> None:
     conn = get_connection()
     try:
         conn.executescript(SCHEMA)
+        _ensure_column(conn, "opportunities_snapshot", "proposal_submitted_date", "TEXT")
         conn.commit()
     finally:
         conn.close()
@@ -426,6 +452,29 @@ def mark_opportunity_lost(conn: sqlite3.Connection, opp_lead_no: str, now_iso: s
     )
 
 
+def mark_opportunity_proposal_submitted(conn: sqlite3.Connection, opp_lead_no: str, now_iso: str) -> None:
+    conn.execute(
+        """
+        UPDATE opportunities_snapshot
+        SET proposal_submitted_date = COALESCE(proposal_submitted_date, ?)
+        WHERE opp_lead_no = ?
+        """,
+        (now_iso[:10], opp_lead_no),
+    )
+
+
+def list_proposals_submitted(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """All opportunities that ever had a proposal submitted, regardless of current live/lost
+    status - deliberately no is_lost filter."""
+    return conn.execute(
+        """
+        SELECT * FROM opportunities_snapshot
+        WHERE proposal_submitted_date IS NOT NULL
+        ORDER BY proposal_submitted_date DESC
+        """
+    ).fetchall()
+
+
 def has_genuine_activity_since(conn: sqlite3.Connection, opp_id: str, since_date_iso: str) -> bool:
     """True if a real field edit (not the bookkeeping "created"/"marked_lost" events) was
     logged for this opportunity on or after the given date."""
@@ -500,3 +549,37 @@ def upsert_interbu_notes(conn: sqlite3.Connection, bu: str, month: str, discussi
         """,
         (bu, month, discussion_notes, now_iso),
     )
+
+
+def get_user_by_email(conn: sqlite3.Connection, email: str) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+
+
+def insert_user(conn: sqlite3.Connection, email: str, display_name: str, password_hash: str, now_iso: str) -> None:
+    conn.execute(
+        "INSERT INTO users (email, display_name, password_hash, created_at) VALUES (?,?,?,?)",
+        (email, display_name, password_hash, now_iso),
+    )
+
+
+def insert_session(conn: sqlite3.Connection, session_id: str, user_id: int, now_iso: str, expires_at_iso: str) -> None:
+    conn.execute(
+        "INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?,?,?,?)",
+        (session_id, user_id, now_iso, expires_at_iso),
+    )
+
+
+def get_session_with_user(conn: sqlite3.Connection, session_id: str) -> sqlite3.Row | None:
+    return conn.execute(
+        """
+        SELECT sessions.id AS session_id, sessions.expires_at,
+               users.id AS user_id, users.email, users.display_name, users.is_active
+        FROM sessions JOIN users ON users.id = sessions.user_id
+        WHERE sessions.id = ?
+        """,
+        (session_id,),
+    ).fetchone()
+
+
+def delete_session(conn: sqlite3.Connection, session_id: str) -> None:
+    conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))

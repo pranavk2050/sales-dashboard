@@ -1,10 +1,11 @@
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from ..change_tracking import generate_manual_key
+from ..auth import CurrentUser, get_current_user
+from ..change_tracking import LOST_TRACKED_FIELDS, generate_manual_key, log_field_changes
 from ..db import get_connection, get_lost, insert_lost_manual, update_lost_fields
 
 router = APIRouter()
@@ -71,11 +72,10 @@ class LostFields(BaseModel):
 
 class LostCreate(LostFields):
     opp_lead_no: Optional[str] = None
-    changed_by: str
 
 
 class LostUpdate(LostFields):
-    changed_by: str
+    pass
 
 
 def _stringify_date_lost(fields: dict) -> dict:
@@ -85,9 +85,9 @@ def _stringify_date_lost(fields: dict) -> dict:
 
 
 @router.post("/api/lost", status_code=201)
-def create_lost(body: LostCreate):
+def create_lost(body: LostCreate, current_user: CurrentUser = Depends(get_current_user)):
     now_iso = datetime.now(timezone.utc).isoformat()
-    fields = _stringify_date_lost(body.model_dump(exclude={"opp_lead_no", "changed_by"}))
+    fields = _stringify_date_lost(body.model_dump(exclude={"opp_lead_no"}))
 
     conn = get_connection()
     try:
@@ -99,6 +99,7 @@ def create_lost(body: LostCreate):
             opp_id, has_synthetic_id = generate_manual_key("MANUAL-LOST"), True
 
         insert_lost_manual(conn, opp_id, has_synthetic_id, fields, now_iso)
+        log_field_changes(conn, opp_id, None, fields, LOST_TRACKED_FIELDS, now_iso, current_user.display_name)
         conn.commit()
         row = get_lost(conn, opp_id)
     finally:
@@ -107,13 +108,15 @@ def create_lost(body: LostCreate):
 
 
 @router.patch("/api/lost/{opp_id}")
-def update_lost(opp_id: str, body: LostUpdate):
+def update_lost(opp_id: str, body: LostUpdate, current_user: CurrentUser = Depends(get_current_user)):
     now_iso = datetime.now(timezone.utc).isoformat()
     conn = get_connection()
     try:
-        if get_lost(conn, opp_id) is None:
+        old_row = get_lost(conn, opp_id)
+        if old_row is None:
             raise HTTPException(status_code=404, detail="Lost record not found")
-        fields = _stringify_date_lost(body.model_dump(exclude={"changed_by"}, exclude_unset=True))
+        fields = _stringify_date_lost(body.model_dump(exclude_unset=True))
+        log_field_changes(conn, opp_id, old_row, fields, LOST_TRACKED_FIELDS, now_iso, current_user.display_name)
         update_lost_fields(conn, opp_id, fields, now_iso)
         conn.commit()
         row = get_lost(conn, opp_id)

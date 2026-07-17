@@ -24,3 +24,19 @@ export function currentMonth() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
+
+const MONTH_ABBR = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+]
+
+export function formatShortMonth(yyyymm) {
+  if (!yyyymm) return '—'
+  const [y, m] = yyyymm.split('-')
+  return `${MONTH_ABBR[Number(m) - 1]} ${y}`
+}
+
+export function formatWeekLabel(weekStartIso) {
+  if (!weekStartIso) return '—'
+  const [, m, d] = weekStartIso.split('-')
+  return `${d}.${m}`
+}

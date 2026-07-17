@@ -8,8 +8,9 @@ monthly cadence calls. It started as a read-only mirror of an Excel workbook
 dashboard's own database is now the single source of truth. All day-to-day work (adding leads,
 updating status, marking things lost, managing Inter BU projects) happens directly in the UI.
 
-Stack: FastAPI + SQLite backend, React (Vite) + Tailwind + Recharts frontend. No auth — the app
-asks for your name once (stored in the browser) so edits are credited in the audit trail.
+Stack: FastAPI + SQLite backend, React (Vite) + Tailwind + Recharts frontend. Per-user login
+(email + password) gates the whole app — no self-serve signup; accounts are created via a CLI
+script (see **Accounts** below). The signed-in user's name is what's credited in the audit trail.
 
 ## Quick start
 
@@ -32,6 +33,17 @@ need to be running.
 
 There's no production build/deploy configured yet — this runs as two local dev processes.
 
+## Accounts
+
+No self-serve signup — create each teammate's account from `backend/` with the venv active:
+```
+./.venv/Scripts/python scripts/create_user.py --email you@example.com --name "Your Name"
+```
+Prompts for a password (never a CLI arg, so it doesn't land in shell history). Add
+`--update-password` to reset an existing account. Sessions are opaque tokens in a `sessions`
+table (14-day expiry) validated against an httpOnly cookie — no JWT, no signing secret to manage;
+logout/revocation is a real row delete.
+
 ## Using the dashboard
 
 - **Live Opportunities** — the main pipeline view. KPI cards, charts, filters, a "This Week"
@@ -46,36 +58,46 @@ There's no production build/deploy configured yet — this runs as two local dev
 - **Alerts (bell icon)** — flags any live opportunity that's 15+ days past its timeline with no
   recorded activity. Dismiss to clear it from the badge.
 - **History** — every opportunity's drawer has a History timeline showing who changed what and
-  when (based on the name typed into the one-time name prompt).
+  when — the name comes from the authenticated session, not a self-reported label.
 
 ## Architecture
 
 ```
 backend/app/
-  main.py            FastAPI app, lifespan, background alert-recompute job (60s interval)
+  main.py            FastAPI app, lifespan, background alert-recompute job (60s interval),
+                     auth_router registered unprotected + dependencies=[Depends(get_current_user)]
+                     on every other router
+  auth.py            Password hashing (bcrypt), session cookie creation/validation, CurrentUser
   db.py              All SQLite schema + queries (single dashboard.db file, see below)
   models.py          Pydantic models used by the (now dormant) ingestion pipeline
   change_tracking.py Field-diff → change_log helper, shared by create/edit endpoints
   alerts.py          Overdue-with-no-activity alert engine
   interbu_report.py  Printable HTML report generator for Inter BU
   email_sender.py    EmailSender interface stub (not wired to anything real yet)
-  routers/           opportunities.py, changes.py (lost + history), this_week.py, alerts.py, interbu.py
+  routers/           auth.py (login/logout/me, unprotected), opportunities.py, changes.py
+                     (lost + history), this_week.py, alerts.py, interbu.py
   ingestion/         DORMANT — Excel parsing (WorkbookSource/LocalFileSource + parser.py).
                      Kept in the repo in case a bulk re-import is ever needed again; nothing in
                      main.py calls it anymore.
 
+backend/scripts/
+  create_user.py     Bootstraps/resets a login account (getpass-prompted password)
+  generate_sample.py Generates a sample workbook for the dormant ingestion pipeline
+
 frontend/src/
-  pages/             LiveOpportunities.jsx, LostOpportunities.jsx, InterBU.jsx
+  pages/             LiveOpportunities.jsx, LostOpportunities.jsx, InterBU.jsx, Login.jsx
   components/        Tables, drawers/forms (OpportunityDrawer, LostOpportunityDrawer,
-                     InterBUProjectDrawer), charts/, NameGate (name prompt), AlertsBell
-  hooks/              useOpportunities/useLostOpportunities/useInterBU — poll every 20s, expose reload()
-  lib/               api.js (all fetch calls), format.js, currentUser.js (localStorage name), etc.
+                     InterBUProjectDrawer), charts/, AlertsBell
+  hooks/             useOpportunities/useLostOpportunities/useInterBU — poll every 20s, expose
+                     reload(); useAuth.js — session status + login/logout
+  lib/               api.js (all fetch calls, routed through apiFetch.js), apiFetch.js
+                     (credentials:'include' + global 401 handling), auth.js, format.js, etc.
 ```
 
 **Database**: `backend/dashboard.db` (SQLite, gitignored). This is now **the only copy of the
 data** — back it up regularly (it's a single file, trivial to copy). Key tables:
 `opportunities_snapshot`, `lost_snapshot`, `interbu_snapshot`, `interbu_monthly_notes`,
-`change_log` (audit trail), `alerts`.
+`change_log` (audit trail), `alerts`, `users`, `sessions`.
 
 ## Extension points
 
@@ -87,8 +109,8 @@ data** — back it up regularly (it's a single file, trivial to copy). Key table
 
 ## Known limitations (by design, not oversight)
 
-- **No authentication.** The name prompt is just a label for the audit trail, not a login —
-  anyone with network access to the frontend can use it as anyone.
+- **Invite-only, no self-serve signup.** Accounts are created via `create_user.py`; there's no
+  "forgot password" flow beyond re-running that script with `--update-password`.
 - **No hard delete.** Opportunities are "removed" by marking them lost; Inter BU/Lost records
   can be edited but not deleted.
 - **`sl_no`** is mostly meaningless — it was a broken/legacy column in the original workbook

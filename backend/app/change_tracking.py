@@ -17,6 +17,20 @@ TRACKED_FIELDS = [
     "timeline",
     "delivery_team",
     "sales_team",
+    "proposal_submitted_date",
+]
+
+LOST_TRACKED_FIELDS = [
+    "customer",
+    "description",
+    "tentative_value_cr",
+    "opportunity_multiplier",
+    "expected_quarter",
+    "lost_reason",
+    "date_lost",
+    "team_member_1",
+    "team_member_2",
+    "notes",
 ]
 
 
@@ -34,16 +48,20 @@ def generate_manual_key(tag: str) -> str:
     return f"LEAD-{tag}-{uuid4().hex[:10]}"
 
 
-def log_opportunity_changes(conn, opp_id: str, old_row, new_values: dict, now_iso: str, changed_by: str) -> None:
+def log_field_changes(conn, opp_id: str, old_row, new_values: dict, tracked_fields: list, now_iso: str, changed_by: str) -> None:
     """old_row: sqlite3.Row or None (brand-new record). new_values: dict of field_name -> new
-    value, for whichever TRACKED_FIELDS are present in this create/edit payload."""
+    value, for whichever of tracked_fields are present in this create/edit payload."""
     if old_row is None:
         insert_change_log(conn, opp_id, "created", None, new_values.get("customer"), now_iso, changed_by)
         return
-    for field_name in TRACKED_FIELDS:
+    for field_name in tracked_fields:
         if field_name not in new_values:
             continue
         new_val = stringify(new_values[field_name])
         old_val = stringify(old_row[field_name])
         if new_val != old_val:
             insert_change_log(conn, opp_id, field_name, old_val, new_val, now_iso, changed_by)
+
+
+def log_opportunity_changes(conn, opp_id: str, old_row, new_values: dict, now_iso: str, changed_by: str) -> None:
+    log_field_changes(conn, opp_id, old_row, new_values, TRACKED_FIELDS, now_iso, changed_by)

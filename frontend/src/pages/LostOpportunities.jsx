@@ -19,8 +19,10 @@ export default function LostOpportunities() {
     <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Lost Opportunities</h1>
-          <p className="text-gray-500 text-sm mt-1">Opportunities that moved out of the live pipeline.</p>
+          <h1 className="text-2xl font-semibold text-gray-900">Lost/Abandoned Opportunities</h1>
+          <p className="text-gray-500 text-sm mt-1">
+            Opportunities that were lost or abandoned, moved out of the live pipeline.
+          </p>
         </div>
         <button
           type="button"

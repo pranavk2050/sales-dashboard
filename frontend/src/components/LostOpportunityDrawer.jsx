@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { createLostRecord, updateLostRecord } from '../lib/api'
-import { getUserName } from '../lib/currentUser'
 import { formatCr, formatDate } from '../lib/format'
 import OppLeadId from './OppLeadId'
 
@@ -76,20 +75,15 @@ export default function LostOpportunityDrawer({ record, creating, onClose, onSav
     setSaving(true)
     setError(null)
     try {
-      const changed_by = getUserName() || 'Anonymous'
       if (creating) {
         await createLostRecord({
           opp_lead_no: draft.opp_lead_no || undefined,
           ...draftToPayload(draft),
-          changed_by,
         })
         onSaved()
         onClose()
       } else {
-        const updated = await updateLostRecord(current.opp_lead_no, {
-          ...draftToPayload(draft),
-          changed_by,
-        })
+        const updated = await updateLostRecord(current.opp_lead_no, draftToPayload(draft))
         setCurrent(updated)
         setDraft(toDraft(updated))
         setIsEditing(false)
