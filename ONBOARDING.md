@@ -143,6 +143,8 @@ logout/revocation is a real row delete.
 
 ## Architecture
 
+![Architecture diagram: local dev vs. Render production with Litestream/Backblaze B2 backup](architecture-diagram.png)
+
 ```
 backend/app/
   main.py            FastAPI app, lifespan, background alert-recompute job (60s interval),
