@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,8 +9,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .alerts import run_alert_engine
-from .auth import get_current_user
-from .db import get_connection, init_db
+from .auth import get_current_user, hash_password
+from .db import count_users, get_connection, init_db, insert_user
 from .routers.alerts import router as alerts_router
 from .routers.auth import router as auth_router
 from .routers.changes import router as changes_router
@@ -33,9 +34,31 @@ def run_alerts_only() -> None:
         conn.close()
 
 
+def maybe_bootstrap_admin() -> None:
+    """Render's free tier has no shell access, so create_user.py can't be run interactively
+    there. If BOOTSTRAP_ADMIN_EMAIL/PASSWORD are set and no user exists yet, create one from
+    them - a one-time bootstrap, not a standing backdoor, since it never runs again once any
+    user exists."""
+    email = os.environ.get("BOOTSTRAP_ADMIN_EMAIL")
+    password = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD")
+    if not email or not password:
+        return
+    conn = get_connection()
+    try:
+        if count_users(conn) > 0:
+            return
+        name = os.environ.get("BOOTSTRAP_ADMIN_NAME", "Admin")
+        now_iso = datetime.now(timezone.utc).isoformat()
+        insert_user(conn, email, name, hash_password(password), now_iso)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    maybe_bootstrap_admin()
     scheduler.add_job(run_alerts_only, "interval", seconds=60, id="alerts_job")
     scheduler.start()
     yield

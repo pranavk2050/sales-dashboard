@@ -25,3 +25,12 @@ services:
         sync: false
       - key: LITESTREAM_SECRET_ACCESS_KEY
         sync: false
+      # Bootstraps the first login on a fresh database (Render's free tier has no shell, so
+      # create_user.py can't be run interactively there). Only ever fires once - it's a no-op as
+      # soon as any user exists. Fine to leave set after that, or remove once you've logged in.
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: BOOTSTRAP_ADMIN_NAME
+        sync: false

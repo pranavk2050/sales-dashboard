@@ -557,6 +557,10 @@ def get_user_by_email(conn: sqlite3.Connection, email: str) -> sqlite3.Row | Non
     return conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
 
 
+def count_users(conn: sqlite3.Connection) -> int:
+    return conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]
+
+
 def insert_user(conn: sqlite3.Connection, email: str, display_name: str, password_hash: str, now_iso: str) -> None:
     conn.execute(
         "INSERT INTO users (email, display_name, password_hash, created_at) VALUES (?,?,?,?)",

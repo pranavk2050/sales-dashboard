@@ -58,9 +58,16 @@ S3-compatible provider works too, R2 included, just with different endpoint/regi
    and `LITESTREAM_REGION` are already set in `render.yaml`; override them there too if you use a
    different provider or bucket. Also set `COOKIE_SECURE=true` and `COOKIE_SAMESITE=lax` (the app
    defaults to `false`/`lax`, right for local HTTP dev but wrong once you're on real HTTPS).
-4. Deploy. On first boot the bucket is empty, so Litestream skips the restore and the app creates
-   a fresh `dashboard.db` (`create_user.py` needs to be re-run once, via Render's shell, to create
-   the first login). Every boot after that restores the latest replicated copy first.
+4. Set `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` (and optionally
+   `BOOTSTRAP_ADMIN_NAME`, defaults to "Admin") too. Render's free tier has no shell access, so
+   `create_user.py` can't be run interactively there - instead, `main.py`'s startup creates exactly
+   one user from these env vars, and only if the `users` table is still empty. It's a one-time
+   bootstrap, not a standing backdoor: once any user exists, it's a permanent no-op, so it's fine
+   to leave the env vars set (or remove them after your first login, either is fine).
+5. Deploy. On first boot the bucket is empty, so Litestream skips the restore and the app creates
+   a fresh `dashboard.db`, then the bootstrap step above creates your first login. Every boot after
+   that restores the latest replicated copy first (and the bootstrap step no-ops, since a user
+   already exists by then).
 
 Caveats worth knowing (see chat history / commit messages for the fuller reasoning): Litestream
 syncs every few seconds, not instantly, so an abrupt kill at the exact wrong moment could lose the
