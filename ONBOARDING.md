@@ -69,14 +69,50 @@ S3-compatible provider works too, R2 included, just with different endpoint/regi
    that restores the latest replicated copy first (and the bootstrap step no-ops, since a user
    already exists by then).
 
-Caveats worth knowing (see chat history / commit messages for the fuller reasoning): Litestream
-syncs every few seconds, not instantly, so an abrupt kill at the exact wrong moment could lose the
-last few seconds of writes; and Litestream assumes a single writer, so don't turn on multi-instance
-scaling without rethinking storage. Also, Render's free tier spins the service down after ~15 min
-idle - while asleep, the 60s alert-recompute job isn't running at all, and the first request after
-a sleep is slow (cold start + Litestream restore).
+Caveats worth knowing: Litestream syncs every few seconds, not instantly, so an abrupt kill at the
+exact wrong moment could lose the last few seconds of writes. Litestream also assumes a **single
+writer** - don't turn on multi-instance scaling without rethinking storage, and never run a local
+`litestream replicate` (see below) while the Render service is also live, for the same reason.
+Also, Render's free tier spins the service down after ~15 min idle - while asleep, the 60s
+alert-recompute job isn't running at all, and the first request after a sleep is slow (cold start
++ Litestream restore).
 
 For local development, there's no build step - just run the two dev processes below.
+
+### Migrating local data onto a live deployment
+
+A fresh Render deploy starts with an empty database - your real local `backend/dashboard.db` is
+gitignored on purpose and never goes through GitHub. To push it up once (e.g. the first time you
+go live, or to refresh production from a newer local copy):
+
+1. **Suspend the Render service** (Settings → Suspend Web Service) - it must not also be writing
+   to the bucket while you push from your machine (single-writer, see above).
+2. **Clear the bucket's existing replica data** for a clean slate: in the Backblaze/R2 dashboard,
+   browse into the bucket's `dashboard-db/` folder and delete its contents.
+3. **Run one Litestream replicate pass locally**, pointed at your real `dashboard.db` and the same
+   bucket, then stop it once it's written a snapshot (a few seconds for a small db):
+   ```
+   docker run --rm -it \
+     -v "<repo>\backend\litestream.yml:/etc/litestream.yml:ro" \
+     -v "<repo>\backend\dashboard.db:/data/dashboard.db" \
+     -e DASHBOARD_DB_PATH=/data/dashboard.db \
+     -e LITESTREAM_ENDPOINT=<your endpoint> \
+     -e LITESTREAM_BUCKET=<your bucket> \
+     -e LITESTREAM_REGION=<your region> \
+     -e LITESTREAM_ACCESS_KEY_ID=<your key id> \
+     -e LITESTREAM_SECRET_ACCESS_KEY=<your secret> \
+     litestream/litestream:0.3.13 replicate -config /etc/litestream.yml
+   ```
+   Note the db volume mount is **not** `:ro` - Litestream needs to switch the file into WAL mode
+   and manage its `-wal`/`-shm` companions. Stop your local backend dev server first, so nothing
+   else has the file open at the same time. Watch for a `"snapshot written"` log line, then Ctrl+C.
+4. **Resume the Render service.** On boot it restores the snapshot you just pushed.
+5. Log in with a real account from that database - any bootstrap-admin account created via
+   `BOOTSTRAP_ADMIN_EMAIL`/`PASSWORD` won't exist in the migrated data, since it's a different
+   database than the one that got replaced.
+
+If you're on a network with a TLS-inspecting corporate proxy (see **Troubleshooting** below), step
+3 will fail with a certificate error until you inject that proxy's root CA into the container.
 
 ## Accounts
 
@@ -162,6 +198,53 @@ data** — back it up regularly (it's a single file, trivial to copy). Key table
   (`#REF!` errors) and isn't used for anything functional.
 - **Single SQLite file, single process.** Fine for a small team; would need real infra
   (Postgres, auth, deployment) to scale beyond that.
+
+## Troubleshooting
+
+**Docker Hub pulls failing with `403 Forbidden` from `production.cloudfront.docker.com`.** Seen on
+a machine behind a corporate proxy (e.g. Zscaler) - some image layers get blocked while others on
+the same pull succeed, seemingly at random. It's proxy flakiness, not a bad image or a bad
+Dockerfile - just retry the build a few times. Render's own build servers aren't behind your local
+proxy, so this is purely a local Docker Desktop problem, not something that affects the real
+deploy.
+
+**`git push` failing with `HTTP 403` and a `Server: Zscaler` response header.** The same corporate
+proxy blocking outbound content it doesn't like (this repo hit it on a push whose diff happened to
+contain words like `SECRET`/`ACCESS_KEY_ID` in documentation, not an actual secret - likely a DLP
+keyword match). `git fetch` still works because it's a GET with no request body to inspect.
+Workaround: route git over SSH on port 443 instead of HTTPS on port 443, since it isn't
+content-inspected the same way:
+```
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_github -N ""
+```
+Add the printed `.pub` key to GitHub (Settings → SSH and GPG keys), then add to `~/.ssh/config`:
+```
+Host github.com
+  HostName ssh.github.com
+  Port 443
+  User git
+  IdentityFile ~/.ssh/id_ed25519_github
+```
+(Plain port 22 is often blocked outright on corporate networks - port 443 is GitHub's documented
+workaround for exactly this.) Then `git remote set-url origin git@github.com:<user>/<repo>.git`.
+
+**Litestream failing with `tls: failed to verify certificate: x509: certificate signed by unknown
+authority`** when running `litestream replicate`/`restore` locally (see "Migrating local data"
+above). Same corporate TLS-inspecting proxy, this time rejecting the container's outbound HTTPS to
+the S3-compatible endpoint because the proxy re-signs the connection with its own root CA, which
+the container doesn't trust. Fix: export that root CA from Windows' trust store and inject it into
+the container alongside the image's own CA bundle, then point Go's TLS stack at the combined file:
+```powershell
+$outDir = "$env:TEMP\proxy-certs"
+New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+$cert = Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -match "Zscaler" } | Select-Object -First 1
+Export-Certificate -Cert $cert -FilePath "$outDir\proxy-root.cer" | Out-Null
+certutil -encode "$outDir\proxy-root.cer" "$outDir\proxy-root.pem" | Out-Null
+docker run --rm --entrypoint sh litestream/litestream:0.3.13 -c "cat /etc/ssl/certs/ca-certificates.crt" > "$outDir\base-ca-bundle.pem"
+Get-Content "$outDir\base-ca-bundle.pem", "$outDir\proxy-root.pem" | Set-Content "$outDir\combined-ca-bundle.pem"
+```
+Then add to the `docker run` call: `-v "$env:TEMP\proxy-certs\combined-ca-bundle.pem:/etc/ssl/certs/combined-ca-bundle.pem:ro" -e SSL_CERT_FILE=/etc/ssl/certs/combined-ca-bundle.pem`.
+Swap `"Zscaler"` for whatever proxy your network actually uses if different.
 
 ## History / why some things look the way they do
 

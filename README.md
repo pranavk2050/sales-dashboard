@@ -28,5 +28,9 @@ SMTP/Graph sending.
 built React app, single origin, no CORS needed) and wires in
 [Litestream](https://litestream.io) so `dashboard.db` survives Render's free-tier ephemeral disk
 by continuously replicating to an S3-compatible bucket (Backblaze B2's free tier, no card
-required) and restoring on boot. See **ONBOARDING.md → Deploying** for the setup steps and
-caveats, and `render.yaml` for the Render Blueprint.
+required) and restoring on boot. Since Render's free tier has no shell, the first login is created
+from `BOOTSTRAP_ADMIN_EMAIL`/`PASSWORD` env vars instead of running `create_user.py` interactively.
+See **ONBOARDING.md → Deploying** for the setup steps and caveats, **→ Migrating local data onto a
+live deployment** for pushing a real local `dashboard.db` up once, and **→ Troubleshooting** for
+corporate-proxy issues (Docker pull failures, blocked `git push`, Litestream TLS errors) that are
+network artifacts, not app bugs. `render.yaml` has the Render Blueprint.
