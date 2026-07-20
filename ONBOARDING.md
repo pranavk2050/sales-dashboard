@@ -31,7 +31,45 @@ npm run dev
 Open **http://localhost:5173**. The dev server proxies `/api/*` to port 8000, so both processes
 need to be running.
 
-There's no production build/deploy configured yet — this runs as two local dev processes.
+## Deploying (Render, free tier)
+
+The repo root `Dockerfile` builds the frontend and backend into a single image: FastAPI serves
+the built React app directly (see the static-file mount at the bottom of `main.py`), so there's
+one origin and one Render service - no CORS, no split-origin cookie config.
+
+Render's free tier has an **ephemeral disk** - `dashboard.db` would get wiped on every restart
+or redeploy. [Litestream](https://litestream.io) is wired in (`backend/litestream.yml`,
+`backend/docker-entrypoint.sh`) to continuously stream the database to an S3-compatible bucket
+and restore it on boot, so real persistence doesn't require Render's paid disk add-on. This repo
+is set up for **Backblaze B2** (free 10 GB tier, no credit card required to sign up) - any other
+S3-compatible provider works too, R2 included, just with different endpoint/region values:
+
+1. Create a B2 bucket (Backblaze dashboard → B2 Cloud Storage → Create a Bucket), note its
+   **Endpoint** (e.g. `s3.us-east-005.backblazeb2.com` - the region code is embedded in it), then
+   create an **Application Key** scoped to just that bucket (Account → App Keys → Add a New
+   Application Key) - never use the account's Master Application Key for this. Copy the `keyID`
+   and `applicationKey` immediately; they're shown once.
+2. In Render, create a new **Web Service** from this repo with **Environment: Docker** (or use
+   the included `render.yaml` Blueprint, which already has this repo's bucket name/endpoint/region
+   filled in - only the two credential values are left for you to set).
+3. Set these environment variables on the service: `LITESTREAM_ACCESS_KEY_ID` (the `keyID`) and
+   `LITESTREAM_SECRET_ACCESS_KEY` (the `applicationKey`) from step 1 - paste them directly into
+   Render's dashboard, never into a file or commit. `LITESTREAM_ENDPOINT`, `LITESTREAM_BUCKET`,
+   and `LITESTREAM_REGION` are already set in `render.yaml`; override them there too if you use a
+   different provider or bucket. Also set `COOKIE_SECURE=true` and `COOKIE_SAMESITE=lax` (the app
+   defaults to `false`/`lax`, right for local HTTP dev but wrong once you're on real HTTPS).
+4. Deploy. On first boot the bucket is empty, so Litestream skips the restore and the app creates
+   a fresh `dashboard.db` (`create_user.py` needs to be re-run once, via Render's shell, to create
+   the first login). Every boot after that restores the latest replicated copy first.
+
+Caveats worth knowing (see chat history / commit messages for the fuller reasoning): Litestream
+syncs every few seconds, not instantly, so an abrupt kill at the exact wrong moment could lose the
+last few seconds of writes; and Litestream assumes a single writer, so don't turn on multi-instance
+scaling without rethinking storage. Also, Render's free tier spins the service down after ~15 min
+idle - while asleep, the 60s alert-recompute job isn't running at all, and the first request after
+a sleep is slow (cold start + Litestream restore).
+
+For local development, there's no build step - just run the two dev processes below.
 
 ## Accounts
 

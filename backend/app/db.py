@@ -1,9 +1,11 @@
+import os
 import sqlite3
 from pathlib import Path
 
 from .models import InterBURow, LostOpportunityRow, MainSheetRow
 
-DB_PATH = Path(__file__).resolve().parent.parent / "dashboard.db"
+DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "dashboard.db"
+DB_PATH = Path(os.environ.get("DASHBOARD_DB_PATH", DEFAULT_DB_PATH))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS opportunities_snapshot (

@@ -1,8 +1,11 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import Depends, FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from .alerts import run_alert_engine
 from .auth import get_current_user
@@ -54,3 +57,20 @@ app.include_router(proposals_router, dependencies=_auth_dep)
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+# In local dev the frontend is served by its own Vite dev server (proxying /api here), so this
+# directory won't exist and the block below is skipped entirely. In the production Docker image,
+# the frontend build output is copied to backend/static - mounted last so it can never shadow an
+# /api/* route registered above.
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+
+if STATIC_DIR.is_dir():
+    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
+
+    @app.get("/{full_path:path}")
+    def spa(full_path: str):
+        candidate = STATIC_DIR / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(STATIC_DIR / "index.html")

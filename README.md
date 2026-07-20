@@ -23,3 +23,10 @@ in the repo but dormant — no longer wired into `main.py` — in case a bulk Ex
 needed again (e.g. `backend/scripts/generate_sample.py` still generates a sample workbook for it).
 `EmailSender` (`backend/app/email_sender.py`) — swap the Inter BU report's `mailto:` stub for real
 SMTP/Graph sending.
+
+**Deploying:** the root `Dockerfile` builds frontend + backend into one image (FastAPI serves the
+built React app, single origin, no CORS needed) and wires in
+[Litestream](https://litestream.io) so `dashboard.db` survives Render's free-tier ephemeral disk
+by continuously replicating to an S3-compatible bucket (Backblaze B2's free tier, no card
+required) and restoring on boot. See **ONBOARDING.md → Deploying** for the setup steps and
+caveats, and `render.yaml` for the Render Blueprint.

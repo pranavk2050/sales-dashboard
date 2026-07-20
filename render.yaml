@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: sales-dashboard
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: COOKIE_SAMESITE
+        value: lax
+      # Backblaze B2 bucket that Litestream replicates dashboard.db to, and restores from on every
+      # cold start / redeploy. Endpoint/bucket/region aren't secret, so they're filled in below -
+      # the two credential values are NOT, and must be set from the Render dashboard only. See
+      # ONBOARDING.md "Deploying" for how to create the bucket and a properly-scoped key.
+      - key: LITESTREAM_ENDPOINT
+        value: https://s3.us-east-005.backblazeb2.com
+      - key: LITESTREAM_BUCKET
+        value: sales-dashboard-backups
+      - key: LITESTREAM_REGION
+        value: us-east-005
+      - key: LITESTREAM_ACCESS_KEY_ID
+        sync: false
+      - key: LITESTREAM_SECRET_ACCESS_KEY
+        sync: false
